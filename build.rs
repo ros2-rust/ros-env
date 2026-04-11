@@ -1,8 +1,8 @@
 use ament_rs::{search_paths::get_search_paths, AMENT_PREFIX_PATH_ENV_VAR};
 use cargo_toml::Manifest;
 use std::path::{Path, PathBuf};
-use std::{env, fs};
 use std::process::Command;
+use std::{env, fs};
 
 fn is_marked_for_inclusion(path: &PathBuf) -> bool {
     Manifest::from_path(path)
@@ -125,16 +125,21 @@ fn main() {
                 // Wrap the inclusion of each file in a module matching the file stem
                 // so that the generated code can be imported like `ros_env::std_msgs::msgs::Bool`
                 .filter_map(|e| {
-                    e.path()
-                        .file_stem()
+                    let path = std::path::absolute(e.path()).expect("Failed to get absolute path for idiomatic module");
+                    path.file_stem()
                         .and_then(|stem| stem.to_str())
                         .map(|stem| {
-                            let idiomatic_path = e.path().display().to_string();
-                            let sep = std::path::MAIN_SEPARATOR;
-                            let rmw_path = idiomatic_path
-                                .rsplit_once(std::path::MAIN_SEPARATOR)
-                                .map(|(dir, _)| format!("{dir}{sep}{stem}{sep}rmw.rs"))
-                                .unwrap_or_else(|| "rmw.rs".to_string());
+                            let idiomatic_path = path.to_string_lossy().replace('\\', "/");
+
+                            let parent = path
+                                .parent()
+                                .expect("Failed to create rmw path");
+
+                            let rmw_path = parent
+                                .join(stem)
+                                .join("rmw.rs")
+                                .to_string_lossy()
+                                .replace('\\', "/");
 
                             format!("pub mod {stem} {{ {dependencies} include!(\"{idiomatic_path}\"); pub mod rmw {{ {dependencies} include!(\"{rmw_path}\"); }} }}")
                         })

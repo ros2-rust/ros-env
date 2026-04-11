@@ -97,6 +97,8 @@ dependencies = [
 [[package]]
 name = "rosidl_runtime_rs"
 version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2ff07e0a0795fd185dc92bcc5a90db39611c83397f17581cf80d8c0d8944dd6"
 dependencies = [
  "cfg-if",
  "serde",
