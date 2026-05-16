@@ -1,5 +1,6 @@
 use ament_rs::{search_paths::get_search_paths, AMENT_PREFIX_PATH_ENV_VAR};
 use cargo_toml::Manifest;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::{env, fs};
@@ -19,7 +20,7 @@ fn is_marked_for_inclusion(path: &PathBuf) -> bool {
         .unwrap_or(false)
 }
 
-fn star_deps_to_use(manifest: &Manifest) -> String {
+fn star_dep_names(manifest: &Manifest) -> Vec<String> {
     // Find all dependencies for this crate that have a `*` version requirement.
     // We will assume that these are other exported dependencies that need symbols
     // exposed in their module.
@@ -27,11 +28,18 @@ fn star_deps_to_use(manifest: &Manifest) -> String {
         .dependencies
         .iter()
         .filter(|(_, version)| version.req() == "*")
-        .map(|(name, _)| format!("use crate::{name};\n"))
-        .collect::<String>()
+        .map(|(name, _)| name.to_owned())
+        .collect()
 }
 
-fn crate_name_from_ament_package_dir(package_dir: &PathBuf) -> &str {
+fn star_deps_to_use(manifest: &Manifest) -> String {
+    star_dep_names(manifest)
+        .into_iter()
+        .map(|name| format!("use crate::{name};\n"))
+        .collect()
+}
+
+fn crate_name_from_ament_package_dir(package_dir: &Path) -> &str {
     package_dir
         .parent()
         .and_then(|parent| parent.file_name())
@@ -64,8 +72,11 @@ fn main() {
 
     let ament_prefix_paths = get_search_paths().unwrap_or_default();
 
-    // Re-export any generated interface crates that we find
-    let export_crate_tomls: Vec<PathBuf> = ament_prefix_paths
+    // Re-export any generated interface crates that we find. AMENT_PREFIX_PATH
+    // can contain overlays and underlays that provide the same package, so keep
+    // the first provider according to the search path order.
+    let mut discovered_packages = HashSet::new();
+    let export_candidates: Vec<PathBuf> = ament_prefix_paths
         .iter()
         .map(PathBuf::from)
         .flat_map(|base_path| {
@@ -83,7 +94,93 @@ fn main() {
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
         .filter(|path| path.file_name() == Some(std::ffi::OsStr::new("Cargo.toml")))
-        .filter(is_marked_for_inclusion)
+        .filter(|path| {
+            path.parent()
+                .map(crate_name_from_ament_package_dir)
+                .map(|package| discovered_packages.insert(package.to_owned()))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    let candidate_by_package: HashMap<String, PathBuf> = export_candidates
+        .iter()
+        .filter_map(|path| {
+            path.parent()
+                .map(crate_name_from_ament_package_dir)
+                .map(|package| (package.to_owned(), path.to_owned()))
+        })
+        .collect();
+
+    let dependencies_by_package: HashMap<String, Vec<String>> = candidate_by_package
+        .iter()
+        .filter_map(|(package, cargo_toml)| {
+            Manifest::from_path(cargo_toml)
+                .ok()
+                .map(|manifest| (package.to_owned(), star_dep_names(&manifest)))
+        })
+        .collect();
+
+    // Include dependencies of exported packages too. Some distro packages export
+    // generated crates whose metadata is incomplete, but their generated Rust code
+    // still imports dependency packages through the ros-env crate root.
+    let mut included_packages: HashSet<String> = export_candidates
+        .iter()
+        .filter(|path| is_marked_for_inclusion(path))
+        .filter_map(|path| {
+            path.parent()
+                .map(crate_name_from_ament_package_dir)
+                .map(str::to_owned)
+        })
+        .collect();
+    let mut pending_packages: VecDeque<String> = included_packages.iter().cloned().collect();
+
+    while let Some(package) = pending_packages.pop_front() {
+        let Some(dependencies) = dependencies_by_package.get(&package) else {
+            continue;
+        };
+
+        for dependency in dependencies {
+            if candidate_by_package.contains_key(dependency)
+                && included_packages.insert(dependency.clone())
+            {
+                pending_packages.push_back(dependency.clone());
+            }
+        }
+    }
+
+    loop {
+        let invalid_packages: Vec<String> = included_packages
+            .iter()
+            .filter(|package| {
+                dependencies_by_package
+                    .get(*package)
+                    .map(|dependencies| {
+                        dependencies
+                            .iter()
+                            .any(|dependency| !included_packages.contains(dependency))
+                    })
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+
+        if invalid_packages.is_empty() {
+            break;
+        }
+
+        for package in invalid_packages {
+            included_packages.remove(&package);
+        }
+    }
+
+    let export_crate_tomls: Vec<PathBuf> = export_candidates
+        .into_iter()
+        .filter(|path| {
+            path.parent()
+                .map(crate_name_from_ament_package_dir)
+                .map(|package| included_packages.contains(package))
+                .unwrap_or(false)
+        })
         .collect();
 
     // Make sure the script re-runs if any of the sources we want to include change.
