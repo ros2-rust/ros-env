@@ -1,6 +1,6 @@
 [package]
 name = "ros-env"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 authors = ["Sam Privett <sam@privett.dev>"]
 license = "Apache-2.0"

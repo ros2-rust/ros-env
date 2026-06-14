@@ -85,7 +85,7 @@ dependencies = [
 
 [[package]]
 name = "ros-env"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "ament_rs",
  "cargo_toml",
