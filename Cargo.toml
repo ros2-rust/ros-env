@@ -26,3 +26,4 @@ ament_rs = "0.3"
 
 [features]
 serde = ["dep:serde", "dep:serde-big-array", "rosidl_runtime_rs/serde"]
+use_ros_shim = ["rosidl_runtime_rs/use_ros_shim"]
