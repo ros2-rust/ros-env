@@ -39,6 +39,18 @@ fn star_deps_to_use(manifest: &Manifest) -> String {
         .collect()
 }
 
+fn feature_enabled(name: &str) -> bool {
+    env::var_os(format!(
+        "CARGO_FEATURE_{}",
+        name.to_ascii_uppercase().replace('-', "_")
+    ))
+    .is_some()
+}
+
+fn use_ros_shim() -> bool {
+    feature_enabled("use_ros_shim")
+}
+
 fn crate_name_from_ament_package_dir(package_dir: &Path) -> &str {
     package_dir
         .parent()
@@ -55,15 +67,11 @@ fn try_rustfmt(path: &Path) {
         .status()
     {
         Ok(status) if status.success() => {}
-        Ok(status) => {
-            println!("cargo:warning=rustfmt exited with status: {status}");
-        }
-        Err(err) => {
-            println!(
-                "cargo:warning=failed to run rustfmt for {}: {err}",
-                path.display()
-            );
-        }
+        Ok(status) => println!("cargo:warning=rustfmt exited with status: {status}"),
+        Err(err) => println!(
+            "cargo:warning=failed to run rustfmt for {}: {err}",
+            path.display()
+        ),
     }
 }
 
@@ -72,7 +80,7 @@ fn main() {
 
     let ament_prefix_paths = get_search_paths().unwrap_or_default();
 
-    // Re-export any generated interface crates that we find. AMENT_PREFIX_PATH
+    // Find any generated interface crates that we may re-export. AMENT_PREFIX_PATH
     // can contain overlays and underlays that provide the same package, so keep
     // the first provider according to the search path order.
     let mut discovered_packages = HashSet::new();
@@ -120,56 +128,111 @@ fn main() {
         })
         .collect();
 
-    // Include dependencies of exported packages too. Some distro packages export
-    // generated crates whose metadata is incomplete, but their generated Rust code
-    // still imports dependency packages through the ros-env crate root.
-    let mut included_packages: HashSet<String> = export_candidates
-        .iter()
-        .filter(|path| is_marked_for_inclusion(path))
-        .filter_map(|path| {
-            path.parent()
-                .map(crate_name_from_ament_package_dir)
-                .map(str::to_owned)
-        })
-        .collect();
-    let mut pending_packages: VecDeque<String> = included_packages.iter().cloned().collect();
-
-    while let Some(package) = pending_packages.pop_front() {
-        let Some(dependencies) = dependencies_by_package.get(&package) else {
-            continue;
-        };
-
-        for dependency in dependencies {
-            if candidate_by_package.contains_key(dependency)
-                && included_packages.insert(dependency.clone())
-            {
-                pending_packages.push_back(dependency.clone());
-            }
-        }
-    }
-
-    loop {
-        let invalid_packages: Vec<String> = included_packages
+    let include_all = feature_enabled("include_all");
+    let shim = use_ros_shim();
+    let mut included_packages: HashSet<String> = if include_all {
+        export_candidates
             .iter()
-            .filter(|package| {
-                dependencies_by_package
-                    .get(*package)
-                    .map(|dependencies| {
-                        dependencies
-                            .iter()
-                            .any(|dependency| !included_packages.contains(dependency))
-                    })
-                    .unwrap_or(false)
+            .filter(|path| is_marked_for_inclusion(path))
+            .filter_map(|path| {
+                path.parent()
+                    .map(crate_name_from_ament_package_dir)
+                    .map(str::to_owned)
             })
-            .cloned()
+            .collect()
+    } else {
+        let selected_packages = [
+            "action_msgs",
+            "builtin_interfaces",
+            "rcl_interfaces",
+            "rosgraph_msgs",
+            "unique_identifier_msgs",
+            "example_interfaces",
+            "test_msgs",
+        ];
+
+        let mut selected: HashSet<String> = selected_packages
+            .iter()
+            .filter(|name| feature_enabled(name))
+            .map(|name| (*name).to_owned())
             .collect();
 
-        if invalid_packages.is_empty() {
-            break;
+        for package in &selected {
+            if let Some(path) = candidate_by_package.get(package) {
+                if !is_marked_for_inclusion(path) {
+                    panic!(
+                        "selected package `{package}` is present but not opt-in for ros-env inclusion"
+                    );
+                }
+            } else if !shim {
+                panic!(
+                    "selected package `{package}` not found in AMENT_PREFIX_PATH or not a generated interface package"
+                );
+            }
         }
 
-        for package in invalid_packages {
-            included_packages.remove(&package);
+        // Include dependencies of exported packages too. Some distro packages export
+        // generated crates whose metadata is incomplete, but their generated Rust code
+        // still imports dependency packages through the ros-env crate root.
+        let mut pending_packages: VecDeque<String> = selected.iter().cloned().collect();
+        while let Some(package) = pending_packages.pop_front() {
+            let Some(dependencies) = dependencies_by_package.get(&package) else {
+                continue;
+            };
+            for dependency in dependencies {
+                if !candidate_by_package.contains_key(dependency) {
+                    if shim {
+                        continue;
+                    }
+                    panic!("selected package `{package}` depends on missing generated package `{dependency}`");
+                }
+                if selected.insert(dependency.clone()) {
+                    pending_packages.push_back(dependency.clone());
+                }
+            }
+        }
+        selected
+    };
+
+    if include_all {
+        // Include dependencies of exported packages too. Some distro packages export
+        // generated crates whose metadata is incomplete, but their generated Rust code
+        // still imports dependency packages through the ros-env crate root.
+        let mut pending_packages: VecDeque<String> = included_packages.iter().cloned().collect();
+        while let Some(package) = pending_packages.pop_front() {
+            let Some(dependencies) = dependencies_by_package.get(&package) else {
+                continue;
+            };
+            for dependency in dependencies {
+                if candidate_by_package.contains_key(dependency)
+                    && included_packages.insert(dependency.clone())
+                {
+                    pending_packages.push_back(dependency.clone());
+                }
+            }
+        }
+
+        loop {
+            let invalid_packages: Vec<String> = included_packages
+                .iter()
+                .filter(|package| {
+                    dependencies_by_package
+                        .get(*package)
+                        .map(|dependencies| {
+                            dependencies
+                                .iter()
+                                .any(|dependency| !included_packages.contains(dependency))
+                        })
+                        .unwrap_or(false)
+                })
+                .cloned()
+                .collect();
+            if invalid_packages.is_empty() {
+                break;
+            }
+            for package in invalid_packages {
+                included_packages.remove(&package);
+            }
         }
     }
 
@@ -186,10 +249,11 @@ fn main() {
     // Make sure the script re-runs if any of the sources we want to include change.
     for cargo_toml in &export_crate_tomls {
         println!("cargo:rerun-if-changed={}", cargo_toml.display());
-
         if let Some(package_dir) = cargo_toml.parent() {
-            let src_dir = package_dir.join("src");
-            println!("cargo:rerun-if-changed={}", src_dir.display());
+            println!(
+                "cargo:rerun-if-changed={}",
+                package_dir.join("src").display()
+            );
         }
     }
 
@@ -223,23 +287,12 @@ fn main() {
                 // so that the generated code can be imported like `ros_env::std_msgs::msgs::Bool`
                 .filter_map(|e| {
                     let path = std::path::absolute(e.path()).expect("Failed to get absolute path for idiomatic module");
-                    path.file_stem()
-                        .and_then(|stem| stem.to_str())
-                        .map(|stem| {
-                            let idiomatic_path = path.to_string_lossy().replace('\\', "/");
-
-                            let parent = path
-                                .parent()
-                                .expect("Failed to create rmw path");
-
-                            let rmw_path = parent
-                                .join(stem)
-                                .join("rmw.rs")
-                                .to_string_lossy()
-                                .replace('\\', "/");
-
-                            format!("pub mod {stem} {{ {dependencies} include!(\"{idiomatic_path}\"); pub mod rmw {{ {dependencies} include!(\"{rmw_path}\"); }} }}")
-                        })
+                    path.file_stem().and_then(|stem| stem.to_str()).map(|stem| {
+                        let idiomatic_path = path.to_string_lossy().replace('\\', "/");
+                        let parent = path.parent().expect("Failed to create rmw path");
+                        let rmw_path = parent.join(stem).join("rmw.rs").to_string_lossy().replace('\\', "/");
+                        format!("pub mod {stem} {{ {dependencies} include!(\"{idiomatic_path}\"); pub mod rmw {{ {dependencies} include!(\"{rmw_path}\"); }} }}")
+                    })
                 })
                 .collect();
 
@@ -250,6 +303,5 @@ fn main() {
     let out_path =
         PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR not set")).join("interfaces.rs");
     fs::write(&out_path, content).expect("Failed to write interfaces.rs");
-
     try_rustfmt(&out_path);
 }

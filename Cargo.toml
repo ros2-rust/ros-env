@@ -25,5 +25,21 @@ cargo_toml = "0.22"
 ament_rs = "0.3"
 
 [features]
+default = ["include_all"]
+include_all = []
+action_msgs = []
+builtin_interfaces = []
+rcl_interfaces = []
+rosgraph_msgs = []
+unique_identifier_msgs = []
+example_interfaces = []
+test_msgs = []
+rclrs_core = [
+    "action_msgs",
+    "builtin_interfaces",
+    "rcl_interfaces",
+    "rosgraph_msgs",
+    "unique_identifier_msgs",
+]
 serde = ["dep:serde", "dep:serde-big-array", "rosidl_runtime_rs/serde"]
 use_ros_shim = ["rosidl_runtime_rs/use_ros_shim"]
