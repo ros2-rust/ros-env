@@ -2,29 +2,65 @@
 Top-level Rust crate to include generated Rust code found in a sourced ROS 2 workspace.
 
 ## Usage
-The [shape/msg/Plane](https://github.com/ros2/common_interfaces/blob/rolling/shape_msgs/msg/Plane.msg) message can be included with:
+Declare the interface packages your crate needs, then use them through `ros_env`:
+```toml
+[dependencies]
+ros-env = "0.3"
+
+[package.metadata.ros-env]
+interfaces = ["shape_msgs"]
+```
 ```rust
-// Assuming the rust crate for `shape_msgs` is in the `AMENT_PREFIX_PATH`
 use ros_env::shape_msgs::msg::Plane;
 ```
 
-## Details
-Any Rust crate found in the `AMENT_PREFIX_PATH` environment variable, that has opted in, will be `include!()`d.
+Only the packages you and your dependencies ask for are included, together with the interface 
+packages they depend on. In a virtual workspace, where there is no root package to declare on, 
+use `[workspace.metadata.ros-env]` instead.
 
-To opt in, the crate must have the following metadata present in the Cargo.toml
+## Details
+Every crate in the dependency graph may declare interfaces, and `ros-env` includes the
+union of all of those requests. A library therefore only has to declare what it uses
+itself, and an application that pulls in several libraries that depend on message packages
+automatically gets everything they need without having to list the packages from their dependencies.
+
+Within one resolved version of `ros-env`, Cargo builds one crate holding the union, so
+two crates that requested different interfaces still share the same types. A
+`ros_env::std_msgs::msg::Header` handed over by a dependency is the same type its
+dependents name.
+
+The requested packages are looked up under `share/<package>/rust` in the prefixes on
+`AMENT_PREFIX_PATH`. Overlays win over underlays, following the search path order. A
+package that is requested but cannot be found fails the build, naming the crate that
+asked for it.
+
+## Locating the workspace
+Cargo has no supported way to tell a dependency's build script which workspace is being
+built, so `ros-env` derives it from `OUT_DIR`. That guess holds for the usual layout but not, 
+for example, when the target directory lives outside the cargo workspace (e.g. for colcon build). 
+Rather than guess wrong, the build fails and asks you to declare the root. The tidiest way 
+is a one-off entry in the workspace's `.cargo/config.toml`:
+
 ```toml
-[package.metadata.ros-env]
-include = true
+[env]
+CARGO_WORKSPACE_DIR = { value = "", relative = true }
 ```
 
-By default, crates generated from `rosidl_generator_rs` opt in.
+This is inspired from [embuild](https://docs.rs/embuild/latest/embuild/cargo/fn.workspace_dir.html)
+with some tweaks for our use case.
 
 ## Limitations
-- The [include!()](https://doc.rust-lang.org/std/macro.include.html) macro is literal text inclusion. As such, depending 
-  on the number of generated crates found in `AMENT_PREFIX_PATH`, the build times for this crate can be long.
-- The dependencies of the included crates are not included. You cannot dynamically alter cargo dependencies through 
-  anything other than features, and features need to be explicitly declared and enabled. As such, this crate must have 
-  all expected dependencies itself (hence why this crate has a `serde` dependency for example).
+- The [include!()](https://doc.rust-lang.org/std/macro.include.html) macro is literal text
+  inclusion, so build times scale with the size of the requested closure rather than with
+  the number of crates Cargo has to compile.
+- Cargo can resolve semver-incompatible versions of `ros-env` into the same graph. Types
+  from those crate instances remain incompatible even when generated from identical ROS
+  definitions. All participating crates must therefore use compatible `ros-env` version
+  requirements.
+- The dependencies of the included crates are not included. You cannot dynamically alter
+  cargo dependencies through anything other than features, and features need to be
+  explicitly declared and enabled. As such, this crate must have all expected dependencies
+  itself (hence why this crate has a `serde` dependency for example).
 
 ## AI Policy
 Generative tools are allowed in producing contributions to its projects, with some qualifications:
