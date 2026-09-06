@@ -1,13 +1,15 @@
 [package]
 name = "ros-env"
 version = "0.2.0"
-edition = "2021"
+edition = "2024"
 authors = ["Sam Privett <sam@privett.dev>"]
 license = "Apache-2.0"
 description = "Top-level Rust crate to include generated Rust code found in a sourced ROS 2 workspace"
 rust-version = "1.85"
 repository = "https://github.com/ros2-rust/ros-env"
 keywords = ["ROS", "ROS2", "robotics"]
+
+build = "build/build.rs"
 
 [dependencies]
 # All the sources we `include!()` depend on this runtime.
@@ -23,6 +25,9 @@ cargo_toml = "0.22"
 
 # Helper crate for working with AMENT_PREFIX_PATH
 ament_rs = "0.3"
+
+# Used to read the `cargo metadata` output of the consuming workspace
+serde_json = "1"
 
 [features]
 serde = ["dep:serde", "dep:serde-big-array", "rosidl_runtime_rs/serde"]
