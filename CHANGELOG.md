@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/ros2-rust/ros-env/compare/v0.2.0...v0.2.1) - 2026-09-12
+
+### Fixed
+
+- add ros distro env flag for release-plz workflow ([#11](https://github.com/ros2-rust/ros-env/pull/11))
+- bump rosidl_runtime_rs to 0.7 ([#9](https://github.com/ros2-rust/ros-env/pull/9))
+
+### Other
+
+- Adopt the AI policy in all of our ros2_rust repos ([#7](https://github.com/ros2-rust/ros-env/pull/7))
+
 ## [0.2.0](https://github.com/ros2-rust/ros-env/compare/v0.1.1...v0.2.0) - 2026-06-14
 
 ### Fixed
