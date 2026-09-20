@@ -68,6 +68,11 @@ fn try_rustfmt(path: &Path) {
 }
 
 fn main() {
+    // `src/shim.rs` provides the packages instead, so there is nothing to do.
+    if env::var_os("CARGO_FEATURE_USE_ROS_SHIM").is_some() {
+        return;
+    }
+
     println!("cargo:rerun-if-env-changed={AMENT_PREFIX_PATH_ENV_VAR}");
 
     let ament_prefix_paths = get_search_paths().unwrap_or_default();

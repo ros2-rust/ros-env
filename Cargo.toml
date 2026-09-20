@@ -26,6 +26,9 @@ ament_rs = "0.3"
 
 [features]
 serde = ["dep:serde", "dep:serde-big-array", "rosidl_runtime_rs/serde"]
+# Replaces the packages found in the environment with the ones vendored in
+# `src/shim/`, so that dependents can be built and documented without a ROS 2
+# installation.
 use_ros_shim = ["rosidl_runtime_rs/use_ros_shim"]
 
 [package.metadata.docs.rs]
