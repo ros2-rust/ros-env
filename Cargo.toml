@@ -12,6 +12,7 @@ keywords = ["ROS", "ROS2", "robotics"]
 [dependencies]
 # All the sources we `include!()` depend on this runtime.
 rosidl_runtime_rs = "0.7"
+rosidl_buffer_rs = { version = "0.1", optional = true }
 
 # Needed for serliazation and deserialization of vendored messages
 serde = { version = "1", optional = true, features = ["derive"] }
@@ -28,7 +29,8 @@ cargo_toml = "0.22"
 ament_rs = "0.3"
 
 [features]
-serde = ["dep:serde", "dep:serde-big-array", "rosidl_runtime_rs/serde"]
+rosidl-buffer = ["dep:rosidl_buffer_rs", "rosidl_runtime_rs/rosidl-buffer"]
+serde = ["dep:serde", "dep:serde-big-array", "rosidl_runtime_rs/serde", "rosidl_buffer_rs?/serde"]
 # Replaces the packages found in the environment with the stubs in `src/shim.rs`,
 # so that dependents can be built and documented without a ROS 2 installation.
 use_ros_shim = ["dep:paste", "rosidl_runtime_rs/use_ros_shim"]
